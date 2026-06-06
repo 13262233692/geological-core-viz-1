@@ -134,11 +134,11 @@ class DicomSliceParser {
   }
 
   getSliceImageData(index) {
-    if (index < 0 || index >= this.slices.length) {
+    if (this.slices.length === 0) {
       return null;
     }
-
-    const slice = this.slices[index];
+    const safeIndex = Math.max(0, Math.min(Math.floor(index), this.slices.length - 1));
+    const slice = this.slices[safeIndex];
     
     if (this.useMockData && slice.imageData) {
       return {

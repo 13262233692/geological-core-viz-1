@@ -39,8 +39,11 @@ app.get('/api/slices', (req, res) => {
 
 app.get('/api/slices/:index/image', (req, res) => {
   try {
-    const index = parseInt(req.params.index, 10);
-    const imageData = parser.getSliceImageData(index);
+    const rawIndex = parseInt(req.params.index, 10);
+    if (isNaN(rawIndex)) {
+      return res.status(400).json({ error: 'Invalid index' });
+    }
+    const imageData = parser.getSliceImageData(rawIndex);
     
     if (!imageData) {
       return res.status(404).json({ error: 'Slice not found' });
@@ -55,14 +58,18 @@ app.get('/api/slices/:index/image', (req, res) => {
 
 app.get('/api/slices/:index', (req, res) => {
   try {
-    const index = parseInt(req.params.index, 10);
+    const rawIndex = parseInt(req.params.index, 10);
+    if (isNaN(rawIndex)) {
+      return res.status(400).json({ error: 'Invalid index' });
+    }
     const slices = parser.getSliceMetadata();
+    const safeIndex = Math.max(0, Math.min(Math.floor(rawIndex), slices.length - 1));
     
-    if (index < 0 || index >= slices.length) {
-      return res.status(404).json({ error: 'Slice not found' });
+    if (slices.length === 0) {
+      return res.status(404).json({ error: 'No slices available' });
     }
     
-    res.json(slices[index]);
+    res.json(slices[safeIndex]);
   } catch (error) {
     console.error('Error getting slice metadata:', error);
     res.status(500).json({ error: 'Internal server error' });

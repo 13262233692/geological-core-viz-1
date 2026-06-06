@@ -71,24 +71,66 @@ class CoreVisualizer {
     window.addEventListener('resize', () => this.onWindowResize());
   }
 
+  generateFallbackImageData() {
+    const width = 128;
+    const height = 128;
+    const data = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        const isCheckerboard = (Math.floor(x / 16) + Math.floor(y / 16)) % 2 === 0;
+        data[idx] = isCheckerboard ? 80 : 60;
+        data[idx + 1] = isCheckerboard ? 60 : 40;
+        data[idx + 2] = isCheckerboard ? 40 : 20;
+        data[idx + 3] = 255;
+      }
+    }
+    return { width, height, data: Array.from(data) };
+  }
+
   async loadData() {
     try {
       const metadataResponse = await fetch('/api/volume/metadata');
+      if (!metadataResponse.ok) {
+        throw new Error(`Metadata request failed: ${metadataResponse.status}`);
+      }
       this.volumeMetadata = await metadataResponse.json();
       
       const slicesResponse = await fetch('/api/slices');
-      const slicesMetadata = await slicesResponse.json();
+      if (!slicesResponse.ok) {
+        throw new Error(`Slices request failed: ${slicesResponse.status}`);
+      }
       
       this.updateVolumeInfo();
       
+      const fallbackImg = this.generateFallbackImageData();
+      
       for (let i = 0; i < this.volumeMetadata.sliceCount; i++) {
-        const imgResponse = await fetch(`/api/slices/${i}/image`);
-        const imgData = await imgResponse.json();
-        this.sliceData.push(imgData);
+        try {
+          const imgResponse = await fetch(`/api/slices/${i}/image`);
+          if (!imgResponse.ok) {
+            console.warn(`Slice ${i} image request failed, using fallback`);
+            this.sliceData.push({ ...fallbackImg });
+            continue;
+          }
+          const imgData = await imgResponse.json();
+          
+          if (!imgData || !imgData.data || !imgData.width || !imgData.height) {
+            console.warn(`Slice ${i} has invalid data, using fallback`);
+            this.sliceData.push({ ...fallbackImg });
+            continue;
+          }
+          
+          this.sliceData.push(imgData);
+        } catch (sliceError) {
+          console.warn(`Error loading slice ${i}, using fallback:`, sliceError);
+          this.sliceData.push({ ...fallbackImg });
+        }
       }
       
       this.createVolumeRendering();
-      this.updateCrossSection(this.volumeMetadata.sliceCount - 1);
+      const safeInitialIndex = Math.min(this.volumeMetadata.sliceCount - 1, this.sliceData.length - 1, 63);
+      this.updateCrossSection(safeInitialIndex);
       
     } catch (error) {
       console.error('Error loading data:', error);
@@ -100,31 +142,48 @@ class CoreVisualizer {
     if (!this.volumeMetadata) return;
     
     const info = document.getElementById('volume-info');
+    const sliceCount = this.volumeMetadata.sliceCount || 0;
+    const width = this.volumeMetadata.width || 0;
+    const height = this.volumeMetadata.height || 0;
+    const minDepth = this.volumeMetadata.minDepth != null ? this.volumeMetadata.minDepth.toFixed(2) : '0.00';
+    const maxDepth = this.volumeMetadata.maxDepth != null ? this.volumeMetadata.maxDepth.toFixed(2) : '0.00';
+    const thickness = this.volumeMetadata.sliceThickness != null ? this.volumeMetadata.sliceThickness.toFixed(2) : '0.00';
+    const minDensity = this.volumeMetadata.minDensity != null ? this.volumeMetadata.minDensity.toFixed(1) : '0.0';
+    const maxDensity = this.volumeMetadata.maxDensity != null ? this.volumeMetadata.maxDensity.toFixed(1) : '0.0';
+    
     info.innerHTML = `
-      <div>切片数量: <strong>${this.volumeMetadata.sliceCount}</strong></div>
-      <div>图像尺寸: <strong>${this.volumeMetadata.width} x ${this.volumeMetadata.height}</strong></div>
-      <div>深度范围: <strong>${this.volumeMetadata.minDepth.toFixed(2)} - ${this.volumeMetadata.maxDepth.toFixed(2)} mm</strong></div>
-      <div>切片厚度: <strong>${this.volumeMetadata.sliceThickness.toFixed(2)} mm</strong></div>
-      <div>密度范围: <strong>${this.volumeMetadata.minDensity.toFixed(1)} - ${this.volumeMetadata.maxDensity.toFixed(1)}</strong></div>
+      <div>切片数量: <strong>${sliceCount}</strong></div>
+      <div>图像尺寸: <strong>${width} x ${height}</strong></div>
+      <div>深度范围: <strong>${minDepth} - ${maxDepth} mm</strong></div>
+      <div>切片厚度: <strong>${thickness} mm</strong></div>
+      <div>密度范围: <strong>${minDensity} - ${maxDensity}</strong></div>
     `;
     
     const cutSlider = document.getElementById('cut-plane');
-    cutSlider.max = this.volumeMetadata.sliceCount - 1;
-    cutSlider.value = this.volumeMetadata.sliceCount - 1;
-    document.getElementById('cut-value').textContent = this.volumeMetadata.sliceCount - 1;
+    const maxValidIndex = Math.max(0, sliceCount - 1);
+    cutSlider.max = maxValidIndex;
+    cutSlider.min = 0;
+    cutSlider.value = maxValidIndex;
+    document.getElementById('cut-value').textContent = maxValidIndex;
   }
 
   createVolumeRendering() {
     if (this.sliceData.length === 0) return;
     
-    const firstSlice = this.sliceData[0];
+    const fallbackImg = this.generateFallbackImageData();
+    const firstValidSlice = this.sliceData.find(s => s && s.width && s.height) || fallbackImg;
     const sliceCount = this.sliceData.length;
-    const aspectRatio = firstSlice.width / firstSlice.height;
+    const aspectRatio = firstValidSlice.width / firstValidSlice.height;
     const baseSize = 3;
     const sliceHeight = (baseSize / sliceCount) * 1.5;
     
     for (let i = 0; i < sliceCount; i++) {
-      const sliceData = this.sliceData[i];
+      let sliceData = this.sliceData[i];
+      
+      if (!sliceData || !sliceData.data || !sliceData.width || !sliceData.height) {
+        console.warn(`Slice ${i} has invalid data, using fallback in volume rendering`);
+        sliceData = fallbackImg;
+      }
       
       const texture = this.createTextureFromImageData(sliceData);
       this.textures.push(texture);
@@ -167,7 +226,19 @@ class CoreVisualizer {
   }
 
   createTextureFromImageData(imgData) {
-    const { width, height, data } = imgData;
+    let width, height, data;
+    
+    if (!imgData || !imgData.data || !imgData.width || !imgData.height) {
+      console.warn('Invalid image data provided to createTextureFromImageData, using fallback');
+      const fallback = this.generateFallbackImageData();
+      width = fallback.width;
+      height = fallback.height;
+      data = fallback.data;
+    } else {
+      width = imgData.width;
+      height = imgData.height;
+      data = imgData.data;
+    }
     
     const canvas = document.createElement('canvas');
     canvas.width = width;
@@ -175,8 +246,9 @@ class CoreVisualizer {
     const ctx = canvas.getContext('2d');
     
     const imageData = ctx.createImageData(width, height);
-    for (let i = 0; i < data.length; i++) {
-      imageData.data[i] = data[i];
+    const dataLength = Math.min(data.length, imageData.data.length);
+    for (let i = 0; i < dataLength; i++) {
+      imageData.data[i] = data[i] || 0;
     }
     ctx.putImageData(imageData, 0, 0);
     
@@ -188,39 +260,65 @@ class CoreVisualizer {
   }
 
   updateCutPlane(value) {
-    this.cutPlanePosition = value;
+    if (this.sliceMeshes.length === 0) return;
     
-    const maxIndex = this.volumeMetadata ? this.volumeMetadata.sliceCount - 1 : 100;
-    const normalizedCut = value / maxIndex;
+    const maxIndex = Math.max(0, this.sliceMeshes.length - 1);
+    const safeValue = Math.max(0, Math.min(Math.floor(value), maxIndex));
+    this.cutPlanePosition = safeValue;
+    
+    const normalizedCut = maxIndex > 0 ? safeValue / maxIndex : 1;
     
     this.sliceMeshes.forEach((mesh, index) => {
-      const meshNormalized = index / (this.sliceMeshes.length - 1);
+      const meshNormalized = maxIndex > 0 ? index / maxIndex : 1;
       mesh.visible = meshNormalized <= normalizedCut;
     });
     
-    const crossSectionIndex = Math.min(value, this.sliceMeshes.length - 1);
+    const crossSectionIndex = Math.max(0, Math.min(safeValue, this.sliceData.length - 1));
     this.updateCrossSection(crossSectionIndex);
   }
 
   updateCrossSection(index) {
-    if (index < 0 || index >= this.sliceData.length) return;
+    if (!this.crossSectionCtx) return;
     
-    const sliceData = this.sliceData[index];
+    const safeIndex = Math.max(0, Math.min(Math.floor(index), this.sliceData.length - 1));
+    
+    if (safeIndex < 0 || safeIndex >= this.sliceData.length) {
+      this.crossSectionCtx.fillStyle = '#1a1a2e';
+      this.crossSectionCtx.fillRect(0, 0, this.crossSectionCanvas.width, this.crossSectionCanvas.height);
+      this.crossSectionCtx.fillStyle = '#e94560';
+      this.crossSectionCtx.font = '14px Arial';
+      this.crossSectionCtx.fillText('数据不可用', 40, 64);
+      document.getElementById('cross-section-info').textContent = `深度: - (切片 ${index})`;
+      return;
+    }
+    
+    const sliceData = this.sliceData[safeIndex];
+    
+    if (!sliceData || !sliceData.data || !sliceData.width || !sliceData.height) {
+      const fallback = this.generateFallbackImageData();
+      sliceData.width = fallback.width;
+      sliceData.height = fallback.height;
+      sliceData.data = fallback.data;
+    }
+    
     const { width, height, data } = sliceData;
     
     this.crossSectionCanvas.width = width;
     this.crossSectionCanvas.height = height;
     
     const imageData = this.crossSectionCtx.createImageData(width, height);
-    for (let i = 0; i < data.length; i++) {
-      imageData.data[i] = data[i];
+    const dataLength = Math.min(data.length, imageData.data.length);
+    for (let i = 0; i < dataLength; i++) {
+      imageData.data[i] = data[i] != null ? data[i] : 0;
     }
     this.crossSectionCtx.putImageData(imageData, 0, 0);
     
-    const depth = this.volumeMetadata 
-      ? (index * this.volumeMetadata.sliceThickness + this.volumeMetadata.minDepth).toFixed(2)
-      : index;
-    document.getElementById('cross-section-info').textContent = `深度: ${depth} mm (切片 ${index})`;
+    let depthText = `${safeIndex}`;
+    if (this.volumeMetadata && this.volumeMetadata.sliceThickness != null) {
+      const depth = safeIndex * this.volumeMetadata.sliceThickness + this.volumeMetadata.minDepth;
+      depthText = depth.toFixed(2);
+    }
+    document.getElementById('cross-section-info').textContent = `深度: ${depthText} mm (切片 ${safeIndex})`;
   }
 
   updateOpacity(value) {
