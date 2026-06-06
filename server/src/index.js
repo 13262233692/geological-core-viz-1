@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const DicomSliceParser = require('./dicomParser');
+const FluidPathSimulator = require('./fluidPathSimulator');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -13,6 +14,9 @@ const dataDir = path.join(__dirname, '..', 'data');
 const parser = new DicomSliceParser(dataDir);
 
 parser.loadAllSlices();
+
+const fluidSimulator = new FluidPathSimulator(parser);
+let cachedFlowPaths = null;
 
 app.get('/api/volume/metadata', (req, res) => {
   try {
