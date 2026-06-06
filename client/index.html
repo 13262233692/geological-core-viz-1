@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>岩心样本三维可视化系统</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <div id="app">
+    <div id="canvas-container"></div>
+    <div id="control-panel">
+      <h2>控制面板</h2>
+      
+      <div class="control-group">
+        <h3>体积信息</h3>
+        <div id="volume-info" class="info-panel">加载中...</div>
+      </div>
+      
+      <div class="control-group">
+        <h3>剖切控制</h3>
+        <div class="slider-container">
+          <label for="cut-plane">剖切深度: <span id="cut-value">0</span></label>
+          <input type="range" id="cut-plane" min="0" max="100" value="100">
+        </div>
+        <div class="slider-container">
+          <label for="opacity">透明度: <span id="opacity-value">0.8</span></label>
+          <input type="range" id="opacity" min="0" max="100" value="80">
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <h3>横截面预览</h3>
+        <div id="cross-section-container">
+          <canvas id="cross-section-canvas"></canvas>
+          <div id="cross-section-info">深度: -</div>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <h3>显示选项</h3>
+        <label class="checkbox-label">
+          <input type="checkbox" id="show-wireframe" checked>
+          显示线框
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="auto-rotate">
+          自动旋转
+        </label>
+      </div>
+      
+      <div class="control-group">
+        <h3>操作说明</h3>
+        <ul class="help-text">
+          <li>鼠标左键拖动：旋转视角</li>
+          <li>鼠标滚轮：缩放</li>
+          <li>鼠标右键拖动：平移</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
